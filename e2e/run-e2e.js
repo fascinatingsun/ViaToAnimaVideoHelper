@@ -43,10 +43,32 @@ async function main() {
     console.log(`E2E: Generating image for step ${step.id}...`);
     const imageResp = await axios.post(`${API_BASE}/api/generate-image`, { prompt: promptResp.prompt, style: null }).then(r => r.data).catch(err => { console.error('Generate-image failed:', err.message); process.exit(7); });
     console.log('E2E: Image URL:', imageResp.imageUrl);
-    if (!imageResp.imageUrl) {
-      console.error('E2E: Image generation returned no URL');
+    if (imageResp.provider !== 'pollinations' || !imageResp.imageUrl) {
+      console.error('E2E: Image generation returned an invalid Pollinations response');
       process.exit(8);
     }
+
+    let imageCheck;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        imageCheck = await axios.head(imageResp.imageUrl, { timeout: 60000 });
+        break;
+      } catch (err) {
+        if (attempt === 3) {
+          console.error('E2E: Generated image URL failed after retries:', err.message);
+          process.exit(11);
+        }
+        console.log(`E2E: Image check attempt ${attempt} failed; retrying...`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
+
+    const contentType = imageCheck.headers['content-type'] || '';
+    if (imageCheck.status !== 200 || !contentType.startsWith('image/')) {
+      console.error('E2E: Generated URL did not return an image:', imageCheck.status, contentType);
+      process.exit(12);
+    }
+    console.log('E2E: Pollinations image verified:', contentType);
   }
 
   console.log('E2E: All steps completed successfully');

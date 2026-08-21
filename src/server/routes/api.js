@@ -13,7 +13,17 @@ const router = express.Router();
 async function generateGeminiContent(text) {
   const url = `${GEMINI_BASE}/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_KEY)}`;
   const body = { contents: [{ parts: [{ text }] }] };
-  return axios.post(url, body, { headers: { 'Content-Type': 'application/json' }, timeout: 20000 });
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await axios.post(url, body, { headers: { 'Content-Type': 'application/json' }, timeout: 30000 });
+    } catch (error) {
+      lastError = error;
+      if (error.response && error.response.status < 500 && error.response.status !== 429) throw error;
+      if (attempt < 3) await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+    }
+  }
+  throw lastError;
 }
 
 function getGeminiText(data) {
@@ -102,14 +112,15 @@ router.post('/gemini-chat', async (req, res) => {
   }
 });
 
-// Generate image via Shedevrum (placeholder). Replace with real API call using SHEDEVRUM_API_KEY
+// Build a Pollinations image URL. Pollinations does not require an API key.
 router.post('/generate-image', async (req, res) => {
   const { prompt, style } = req.body;
-  if (!prompt) return res.status(400).json({ error: 'prompt required' });
+  if (typeof prompt !== 'string' || !prompt.trim()) return res.status(400).json({ error: 'prompt required' });
 
-  const styleLabel = style && style.name ? encodeURIComponent(style.name) : 'default';
-  const placeholder = `https://via.placeholder.com/512x512.png?text=${encodeURIComponent('Generated+' + (styleLabel || 'Image'))}`;
-  res.json({ ok: true, imageUrl: placeholder, usedStyle: style || null });
+  const styleText = style && style.name ? `, ${style.name} style` : '';
+  const finalPrompt = `${prompt.trim()}${styleText}`;
+  const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=1024&height=1024&nologo=true&safe=true`;
+  res.json({ ok: true, imageUrl, prompt: finalPrompt, provider: 'pollinations' });
 });
 
 module.exports = router;

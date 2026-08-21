@@ -177,6 +177,11 @@ export default function App() {
   const [geminiResponse, setGeminiResponse] = useState('')
   const [geminiError, setGeminiError] = useState('')
   const [geminiLoading, setGeminiLoading] = useState(false)
+  const [pollinationsPrompt, setPollinationsPrompt] = useState('')
+  const [pollinationsImageUrl, setPollinationsImageUrl] = useState('')
+  const [pollinationsError, setPollinationsError] = useState('')
+  const [pollinationsLoading, setPollinationsLoading] = useState(false)
+  const [pollinationsProgress, setPollinationsProgress] = useState(0)
 
   const sendGeminiMessage = async () => {
     setGeminiResponse('')
@@ -200,6 +205,28 @@ export default function App() {
       setGeminiError(err.message || String(err))
     } finally {
       setGeminiLoading(false)
+    }
+  }
+
+  const generatePollinationsImage = async () => {
+    if (!pollinationsPrompt.trim()) return alert('Enter an image prompt')
+    setPollinationsError('')
+    setPollinationsImageUrl('')
+    setPollinationsLoading(true)
+    setPollinationsProgress(10)
+    try {
+      const res = await fetch(`${apiBase}/api/generate-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: pollinationsPrompt })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Image generation failed')
+      setPollinationsImageUrl(data.imageUrl)
+      setPollinationsProgress(35)
+    } catch (err) {
+      setPollinationsError(err.message || String(err))
+      setPollinationsLoading(false)
     }
   }
 
@@ -317,6 +344,38 @@ export default function App() {
           <strong>Gemini error (raw):</strong>
           <pre style={{ whiteSpace: 'pre-wrap', background: '#fff0f0', padding: 8, borderRadius: 6, maxHeight: 240, overflow: 'auto', color: '#900' }}>{geminiError || <em>No error.</em>}</pre>
         </div>
+      </section>
+
+      <section>
+        <h2>Generate image with Pollinations</h2>
+        <textarea
+          placeholder="Describe the image you want to create..."
+          value={pollinationsPrompt}
+          onChange={e => setPollinationsPrompt(e.target.value)}
+          rows={4}
+          aria-label="Pollinations image prompt"
+        />
+        <button onClick={generatePollinationsImage} disabled={pollinationsLoading}>
+          {pollinationsLoading ? 'Generating image...' : 'Generate image'}
+        </button>
+        {pollinationsLoading && (
+          <div className="generation-progress" role="status" aria-live="polite">
+            <progress value={pollinationsProgress} max="100" />
+            <span>{pollinationsProgress}%</span>
+          </div>
+        )}
+        {pollinationsError && <p className="generation-error">{pollinationsError}</p>}
+        {pollinationsImageUrl && (
+          <div className="generated-image-result">
+            <img
+              src={pollinationsImageUrl}
+              alt={pollinationsPrompt}
+              onLoad={() => { setPollinationsProgress(100); setPollinationsLoading(false) }}
+              onError={() => { setPollinationsError('Pollinations could not load this image. Try a different prompt.'); setPollinationsLoading(false) }}
+            />
+            <a href={pollinationsImageUrl} target="_blank" rel="noreferrer">Open full-size image</a>
+          </div>
+        )}
       </section>
 
       <footer style={{ marginTop: 24 }}>
