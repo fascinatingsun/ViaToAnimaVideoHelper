@@ -1,0 +1,327 @@
+import React, { useState, useEffect } from 'react'
+import './App.css'
+
+export default function App() {
+  const [file, setFile] = useState(null)
+  const [uploadResp, setUploadResp] = useState(null)
+  const [analysis, setAnalysis] = useState(null)
+  const [prompt, setPrompt] = useState('')
+  const [imageUrl, setImageUrl] = useState(null)
+  const [styles, setStyles] = useState([])
+  const [styleName, setStyleName] = useState('')
+  const [selectedStyleIndex, setSelectedStyleIndex] = useState(0)
+  const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:4000'
+
+  useEffect(() => {
+    try {
+      const cookieMatch = document.cookie.match('(^|;)\\s*styles=\\s*([^;]+)')
+      if (cookieMatch) {
+        const decoded = decodeURIComponent(cookieMatch[2])
+        setStyles(JSON.parse(decoded))
+        return
+      }
+    } catch (e) {}
+    const ls = localStorage.getItem('via_styles')
+    if (ls) setStyles(JSON.parse(ls))
+  }, [])
+
+  const persistStyles = (newStyles) => {
+    try {
+      const encoded = encodeURIComponent(JSON.stringify(newStyles))
+      document.cookie = `styles=${encoded}; path=/; max-age=${60 * 60 * 24 * 365}`
+    } catch (e) {
+      localStorage.setItem('via_styles', JSON.stringify(newStyles))
+    }
+    localStorage.setItem('via_styles', JSON.stringify(newStyles))
+  }
+
+  const saveStyle = () => {
+    if (!styleName) return alert('Enter a style name')
+    const newStyle = { name: styleName, params: {} }
+    const newStyles = [...styles, newStyle]
+    setStyles(newStyles)
+    setStyleName('')
+    persistStyles(newStyles)
+  }
+
+  const deleteStyle = (i) => {
+    const newStyles = styles.filter((_, idx) => idx !== i)
+    setStyles(newStyles)
+    persistStyles(newStyles)
+    if (selectedStyleIndex >= newStyles.length) setSelectedStyleIndex(0)
+  }
+
+  const upload = async () => {
+    if (!file) return alert('Select an audio file')
+    const fd = new FormData();
+    fd.append('audio', file)
+    const res = await fetch(`${apiBase}/api/upload`, { method: 'POST', body: fd })
+    const j = await res.json()
+    setUploadResp(j)
+  }
+
+  // Plan/state management
+  const [plan, setPlan] = useState([])
+  const [globalStylePrompt, setGlobalStylePrompt] = useState('')
+
+  useEffect(() => {
+    try {
+      const m = document.cookie.match('(^|;)\\s*global_style=\\s*([^;]+)')
+      if (m) setGlobalStylePrompt(decodeURIComponent(m[2]))
+    } catch (e) {}
+  }, [])
+
+  const setGlobalStyle = (v) => {
+    setGlobalStylePrompt(v)
+    try {
+      document.cookie = `global_style=${encodeURIComponent(v)}; path=/; max-age=${60 * 60 * 24 * 365}`
+    } catch (e) {
+      localStorage.setItem('global_style', v)
+    }
+  }
+
+  const handleAnalyze = async () => {
+    if (!uploadResp) return alert('Upload audio first')
+    const res = await fetch(`${apiBase}/api/analyze`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: uploadResp.path }) })
+    const j = await res.json()
+    setAnalysis(j.analysis)
+    setPrompt(j.prompt)
+    const p = (j.plan || []).map(s => ({ ...s, open: false }))
+    setPlan(p)
+  }
+
+  const addStep = () => {
+    const id = Date.now()
+    const newStep = { id, title: 'New step', summary: '', prompt: '', images: [], open: true }
+    const p = [...plan, newStep]
+    setPlan(p)
+  }
+
+  const updateStep = (id, patch) => {
+    const p = plan.map(s => s.id === id ? { ...s, ...patch } : s)
+    setPlan(p)
+  }
+
+  const deleteStep = (id) => {
+    if (!confirm('Delete this step?')) return
+    setPlan(plan.filter(s => s.id !== id))
+  }
+
+  const toggleOpen = (id) => updateStep(id, { open: !plan.find(s => s.id === id)?.open })
+
+  const generatePromptForStep = async (step) => {
+    const res = await fetch(`${apiBase}/api/generate-prompt`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stepText: step.summary || step.title, transcription: analysis && analysis.transcription, analysis }) })
+    const j = await res.json()
+    if (j.prompt) updateStep(step.id, { prompt: j.prompt })
+  }
+
+  const generateImageForStep = async (step) => {
+    const finalPrompt = [globalStylePrompt || '', step.prompt || '', step.summary || ''].filter(Boolean).join(' -- ')
+    const style = styles[selectedStyleIndex] || null
+    const res = await fetch(`${apiBase}/api/generate-image`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: finalPrompt, style }) })
+    const j = await res.json()
+    if (j.imageUrl) {
+      const img = { url: j.imageUrl, prompt: finalPrompt, saved: false }
+      updateStep(step.id, { images: [...(step.images || []), img] })
+    }
+  }
+
+  const saveImage = (stepId, idx) => {
+    const step = plan.find(s => s.id === stepId)
+    if (!step) return
+    const images = [...step.images]
+    images[idx] = { ...images[idx], saved: true }
+    updateStep(stepId, { images })
+    try {
+      const saves = JSON.parse(localStorage.getItem('via_image_saves') || '{}')
+      saves[images[idx].url] = { savedAt: Date.now(), prompt: images[idx].prompt }
+      localStorage.setItem('via_image_saves', JSON.stringify(saves))
+    } catch (e) {}
+  }
+
+  const deleteImage = (stepId, idx) => {
+    if (!confirm('Delete this image from the step?')) return
+    const step = plan.find(s => s.id === stepId)
+    if (!step) return
+    const images = step.images.filter((_, i) => i !== idx)
+    updateStep(stepId, { images })
+  }
+
+  const editImagePrompt = (stepId, idx) => {
+    const step = plan.find(s => s.id === stepId)
+    if (!step) return
+    const img = step.images[idx]
+    const newPrompt = window.prompt('Edit prompt used for this image', img.prompt)
+    if (newPrompt !== null) {
+      const images = [...step.images]
+      images[idx] = { ...images[idx], prompt: newPrompt }
+      updateStep(stepId, { images })
+    }
+  }
+
+  const regenerateImage = async (stepId, idx) => {
+    const step = plan.find(s => s.id === stepId)
+    if (!step) return
+    const img = step.images[idx]
+    const res = await fetch(`${apiBase}/api/generate-image`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: img.prompt, style: styles[selectedStyleIndex] || null }) })
+    const j = await res.json()
+    if (j.imageUrl) {
+      const images = [...step.images]
+      images[idx] = { ...images[idx], url: j.imageUrl }
+      updateStep(stepId, { images })
+    }
+  }
+
+  // Gemini chat UI state
+  const [geminiMessage, setGeminiMessage] = useState('')
+  const [geminiResponse, setGeminiResponse] = useState('')
+  const [geminiError, setGeminiError] = useState('')
+  const [geminiLoading, setGeminiLoading] = useState(false)
+
+  const sendGeminiMessage = async () => {
+    setGeminiResponse('')
+    setGeminiError('')
+    if (!geminiMessage) return alert('Enter a message to send to Gemini')
+    setGeminiLoading(true)
+    try {
+      const res = await fetch(`${apiBase}/api/gemini-chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: geminiMessage }) })
+      const text = await res.text()
+      // try parse JSON
+      try {
+        const parsed = JSON.parse(text)
+        if (res.ok) setGeminiResponse(JSON.stringify(parsed, null, 2))
+        else setGeminiError(JSON.stringify(parsed, null, 2))
+      } catch (e) {
+        // not JSON
+        if (res.ok) setGeminiResponse(text)
+        else setGeminiError(text)
+      }
+    } catch (err) {
+      setGeminiError(err.message || String(err))
+    } finally {
+      setGeminiLoading(false)
+    }
+  }
+
+  return (
+    <div className="container">
+      <h1>ViaToAnima — Story Builder</h1>
+
+      <section>
+        <h2>Header — Global style prompt (saved to session)</h2>
+        <input value={globalStylePrompt} onChange={e => setGlobalStyle(e.target.value)} style={{ width: '80%' }} placeholder="Enter global style prompt (saved to session)" />
+      </section>
+
+      <section>
+        <h2>1) Upload audio</h2>
+        <input type="file" accept="audio/*" onChange={e => setFile(e.target.files[0])} />
+        <button onClick={upload}>Upload</button>
+        {uploadResp && <div>Uploaded: {uploadResp.filename}</div>}
+      </section>
+
+      <section>
+        <h2>2) Analyze & Plan</h2>
+        <button onClick={handleAnalyze}>Analyze and create plan</button>
+        {analysis && (
+          <div>
+            <strong>Summary:</strong> {analysis.summary}
+            <br />
+            <strong>Topics:</strong> {analysis.topics.join(', ')}
+          </div>
+        )}
+        <div style={{ marginTop: 12 }}>
+          <button onClick={addStep}>Add Step</button>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          {plan.map((s, i) => (
+            <div key={s.id} className="plan-step">
+              <div className="step-header" onClick={() => toggleOpen(s.id)}>
+                <div>
+                  <span className="step-title">{s.title}</span>
+                  <div style={{ fontSize: 12, color: '#666' }}>{s.summary}</div>
+                </div>
+                <div>
+                  <button onClick={(e) => { e.stopPropagation(); updateStep(s.id, { title: prompt('Edit title', s.title) || s.title }) }}>Edit title</button>
+                  <button onClick={(e) => { e.stopPropagation(); deleteStep(s.id) }} style={{ marginLeft: 8 }}>Delete step</button>
+                </div>
+              </div>
+              {s.open && (
+                <div className="step-body">
+                  <div>
+                    <label>Summary:</label>
+                    <input value={s.summary} onChange={e => updateStep(s.id, { summary: e.target.value })} style={{ width: '100%' }} />
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <label>Prompt (editable):</label>
+                    <textarea value={s.prompt} onChange={e => updateStep(s.id, { prompt: e.target.value })} rows={3} />
+                    <div style={{ marginTop: 6 }}>
+                      <button onClick={() => generatePromptForStep(s)}>Ask Gemini to generate prompt</button>
+                      <button onClick={() => generateImageForStep(s)} style={{ marginLeft: 8 }}>Generate image(s)</button>
+                    </div>
+                  </div>
+
+                  <div className="image-gallery">
+                    {(s.images || []).map((img, idx) => (
+                      <div className="thumb" key={idx}>
+                        <img src={img.url} alt={`img-${idx}`} />
+                        {img.saved && <div className="saved-badge">Saved</div>}
+                        <div className="controls">
+                          <button className="ctrl-btn" onClick={() => saveImage(s.id, idx)}>Save</button>
+                          <button className="ctrl-btn" onClick={() => editImagePrompt(s.id, idx)}>Edit</button>
+                          <button className="ctrl-btn" onClick={() => deleteImage(s.id, idx)}>Delete</button>
+                          <button className="ctrl-btn" onClick={() => regenerateImage(s.id, idx)}>Regenerate</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h2>Styles (profiles)</h2>
+        <div>
+          <strong>Saved styles:</strong>
+          <div>
+            {styles.length === 0 && <em>No styles saved.</em>}
+            {styles.map((s, i) => (
+              <label key={i} style={{ display: 'block', marginTop: 6 }}>
+                <input type="radio" name="style" checked={selectedStyleIndex === i} onChange={() => setSelectedStyleIndex(i)} /> {s.name}
+                <button style={{ marginLeft: 8 }} onClick={() => deleteStyle(i)}>Delete</button>
+              </label>
+            ))}
+          </div>
+          <div style={{ marginTop: 8 }}>
+            <input placeholder="Style name" value={styleName} onChange={e => setStyleName(e.target.value)} />
+            <button onClick={saveStyle} style={{ marginLeft: 8 }}>Save style</button>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Chat with Gemini (text only)</h2>
+        <div>
+          <textarea placeholder="Type a message for Gemini..." value={geminiMessage} onChange={e => setGeminiMessage(e.target.value)} rows={4} style={{ width: '100%' }} />
+          <div style={{ marginTop: 8 }}>
+            <button onClick={sendGeminiMessage} disabled={geminiLoading}>{geminiLoading ? 'Sending...' : 'Send to Gemini'}</button>
+          </div>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <strong>Gemini response (raw):</strong>
+          <pre style={{ whiteSpace: 'pre-wrap', background: '#f6f6f6', padding: 8, borderRadius: 6, maxHeight: 240, overflow: 'auto' }}>{geminiResponse || <em>No response yet.</em>}</pre>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <strong>Gemini error (raw):</strong>
+          <pre style={{ whiteSpace: 'pre-wrap', background: '#fff0f0', padding: 8, borderRadius: 6, maxHeight: 240, overflow: 'auto', color: '#900' }}>{geminiError || <em>No error.</em>}</pre>
+        </div>
+      </section>
+
+      <footer style={{ marginTop: 24 }}>
+        <small>Prototype uses mocked AI calls; replace server stubs with real API requests and add API keys to .env.</small>
+      </footer>
+    </div>
+  )
+}
