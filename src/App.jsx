@@ -1,15 +1,52 @@
 import React, { useRef, useState, useEffect } from 'react'
 import './App.css'
 
+function parseGeminiPlanTable(text) {
+  const lines = String(text || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+  const tableLines = lines.filter(line => line.includes('|'))
+  const headerIndex = tableLines.findIndex(line => /таймкод|timecode/i.test(line))
+  if (headerIndex < 0) return []
+
+  const parseRow = (line) => line.replace(/^\|\s*|\s*\|$/g, '').split('|').map(cell => cell.trim())
+  const rows = []
+  for (const line of tableLines.slice(headerIndex + 1)) {
+    if (/^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*){3,}\|?$/.test(line)) continue
+    const cells = parseRow(line)
+    if (cells.length >= 4 && cells.slice(0, 4).some(Boolean)) {
+      rows.push(cells.slice(0, 4))
+    }
+  }
+  return rows
+}
+
 export default function App() {
   const [sessionId] = useState(() => {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID()
     return `session-${Date.now()}-${Math.random().toString(36).slice(2)}`
   })
   const [file, setFile] = useState(null)
-  const [uploadResp, setUploadResp] = useState(null)
-  const [analysis, setAnalysis] = useState(null)
-  const [prompt, setPrompt] = useState('')
+  const defaultGeminiAudioPrompt = `Прослушай этот аудиофайл с медитацией. Обрати внимание: в записи очень много длинных пауз и периодов тишины между редкими словами ведущего. Твоя задача — составить подробный покадровый план для создания визуального ряда (видео для YouTube).
+
+Картинки должны быть максимально нейтральными, гипнотическими, расслабляющими, без резких деталей, чтобы помогать медитации, а не отвлекать от неё. На длинных паузах картинка НЕ должна меняться слишком часто — одна сцена должна удерживать атмосферу.
+
+Выведи результат строго в виде markdown-таблицы со следующими колонками:
+
+1. **Таймкод (От - До)**: Укажи точные границы кадра. Если идет длинная пауза, пусть этот кадр длится всё время паузы.
+2. **Тип момента**: Укажи, что происходит ("Голос ведущего" или "Длинная пауза/Тишина").
+3. **Описание атмосферы**: Коротко опиши настроение звука в этот момент (например: "Плавное погружение", "Глубокая тишина", "Фоновый шум ветра").
+4. **Промпт для генерации (на английском)**: Напиши готовый детальный промпт для нейросети (Midjourney/DALL-E).
+
+Правила для промптов:
+- Пиши только на английском языке.
+- Используй ключевые слова: "cinematic lighting, soft focus, minimal design, zen aesthetics, calming pastel colors, slow gradient, 4k, clean composition".
+- Исключи из промптов: людей, лица, текст, яркие неоновые цвета, резкие геометрические формы, суету. Картинки должны быть абстрактными или природными (туман, рассвет, гладь воды, облака, текстура камня).
+
+Пример строки таблицы:
+
+| 00:00 - 05:30 | Длинная пауза | Абсолютная тишина, расслабление | Minimalist abstract background, soft smooth color gradient from deep blue to warm sand, calming fog, zen style, slow cinematic light, 4k, high details, no people --ar 16:9 |`
+  const [geminiAudioPrompt, setGeminiAudioPrompt] = useState(defaultGeminiAudioPrompt)
+  const [isGeminiAudioPromptOpen, setIsGeminiAudioPromptOpen] = useState(false)
+  const [geminiPlanTable, setGeminiPlanTable] = useState([])
   const [imageUrl, setImageUrl] = useState(null)
   const [styles, setStyles] = useState([])
   const [styleName, setStyleName] = useState('')
@@ -55,13 +92,41 @@ export default function App() {
     if (selectedStyleIndex >= newStyles.length) setSelectedStyleIndex(0)
   }
 
-  const upload = async () => {
+  const sendAudioToGemini = async () => {
     if (!file) return alert('Select an audio file')
-    const fd = new FormData();
-    fd.append('audio', file)
-    const res = await fetch(`${apiBase}/api/upload`, { method: 'POST', body: fd })
-    const j = await res.json()
-    setUploadResp(j)
+    if (!geminiAudioPrompt.trim()) return alert('Enter a prompt for Gemini')
+    setGeminiLoading(true)
+    try {
+      const formData = new FormData()
+      formData.append('message', geminiAudioPrompt.trim())
+      formData.append('audio', file)
+      formData.append('history', JSON.stringify([]))
+      formData.append('sessionId', sessionId)
+      formData.append('model', selectedGeminiModel)
+      const res = await fetch(`${apiBase}/api/gemini-chat`, {
+        method: 'POST',
+        headers: { 'X-Session-ID': sessionId },
+        body: formData
+      })
+      const parsed = await res.json()
+      const answer = res.ok ? getGeminiText(parsed) : ''
+      if (answer) setGeminiPlanTable(parseGeminiPlanTable(answer))
+      setGeminiHistory(history => [...history, {
+        id: Date.now(),
+        question: `${geminiAudioPrompt.trim()} (Audio: ${file.name})`,
+        answer,
+        error: res.ok ? '' : getGeminiText(parsed)
+      }])
+    } catch (err) {
+      setGeminiHistory(history => [...history, {
+        id: Date.now(),
+        question: `${geminiAudioPrompt.trim()} (Audio: ${file.name})`,
+        answer: '',
+        error: err.message || String(err)
+      }])
+    } finally {
+      setGeminiLoading(false)
+    }
   }
 
   // Plan/state management
@@ -84,16 +149,6 @@ export default function App() {
     }
   }
 
-  const handleAnalyze = async () => {
-    if (!uploadResp) return alert('Upload audio first')
-    const res = await fetch(`${apiBase}/api/analyze`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: uploadResp.path }) })
-    const j = await res.json()
-    setAnalysis(j.analysis)
-    setPrompt(j.prompt)
-    const p = (j.plan || []).map(s => ({ ...s, open: false }))
-    setPlan(p)
-  }
-
   const addStep = () => {
     const id = Date.now()
     const newStep = { id, title: 'New step', summary: '', prompt: '', images: [], open: true }
@@ -114,7 +169,7 @@ export default function App() {
   const toggleOpen = (id) => updateStep(id, { open: !plan.find(s => s.id === id)?.open })
 
   const generatePromptForStep = async (step) => {
-    const res = await fetch(`${apiBase}/api/generate-prompt`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stepText: step.summary || step.title, transcription: analysis && analysis.transcription, analysis }) })
+    const res = await fetch(`${apiBase}/api/generate-prompt`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stepText: step.summary || step.title }) })
     const j = await res.json()
     if (j.prompt) updateStep(step.id, { prompt: j.prompt })
   }
@@ -294,18 +349,53 @@ export default function App() {
       <details className="main-section" open>
         <summary><h2>1) Upload audio</h2></summary>
         <input type="file" accept="audio/*" onChange={e => setFile(e.target.files[0])} />
-        <button onClick={upload}>Upload</button>
-        {uploadResp && <div>Uploaded: {uploadResp.filename}</div>}
+        <label className="gemini-model-picker">
+          <span>Gemini version</span>
+          <select className={geminiModels.find(model => model.id === selectedGeminiModel)?.free ? 'gemini-select-free' : 'gemini-select-paid'} value={selectedGeminiModel} onChange={e => setSelectedGeminiModel(e.target.value)} disabled={geminiLoading}>
+            <optgroup label="Free models">
+              {geminiModels.filter(model => model.free).map(model => <option key={model.id} value={model.id}>{model.name} (FREE)</option>)}
+            </optgroup>
+            <optgroup label="Paid models">
+              {geminiModels.filter(model => !model.free).map(model => <option key={model.id} value={model.id}>{model.name} (PAID)</option>)}
+            </optgroup>
+          </select>
+          <strong className={geminiModels.find(model => model.id === selectedGeminiModel)?.free ? 'gemini-free' : 'gemini-paid'}>
+            {geminiModels.find(model => model.id === selectedGeminiModel)?.free ? 'FREE' : 'PAID'}
+          </strong>
+        </label>
+        <div className="audio-actions">
+          <button onClick={sendAudioToGemini} disabled={geminiLoading}>{geminiLoading ? 'Sending...' : 'Send audio to Gemini'}</button>
+        </div>
+        <div className="audio-prompt">
+          <button className="audio-prompt-preview" onClick={() => setIsGeminiAudioPromptOpen(open => !open)} aria-expanded={isGeminiAudioPromptOpen}>
+            {geminiAudioPrompt.trim().split(/\s+/).slice(0, 3).join(' ')}...
+          </button>
+          {isGeminiAudioPromptOpen && <textarea aria-label="Gemini audio prompt" value={geminiAudioPrompt} onChange={e => setGeminiAudioPrompt(e.target.value)} rows={12} />}
+        </div>
       </details>
 
       <details className="main-section" open>
         <summary><h2>2) Analyze & Plan</h2></summary>
-        <button onClick={handleAnalyze}>Analyze and create plan</button>
-        {analysis && (
-          <div>
-            <strong>Summary:</strong> {analysis.summary}
-            <br />
-            <strong>Topics:</strong> {analysis.topics.join(', ')}
+        {geminiPlanTable.length > 0 && (
+          <div className="gemini-plan-result">
+            <h3>Gemini visual plan</h3>
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Таймкод (От - До)</th>
+                    <th>Тип момента</th>
+                    <th>Описание атмосферы</th>
+                    <th>Промпт для генерации (на английском)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {geminiPlanTable.map((row, index) => (
+                    <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
         <div style={{ marginTop: 12 }}>
@@ -320,7 +410,7 @@ export default function App() {
                   <div style={{ fontSize: 12, color: '#666' }}>{s.summary}</div>
                 </div>
                 <div>
-                  <button onClick={(e) => { e.stopPropagation(); updateStep(s.id, { title: prompt('Edit title', s.title) || s.title }) }}>Edit title</button>
+                  <button onClick={(e) => { e.stopPropagation(); updateStep(s.id, { title: window.prompt('Edit title', s.title) || s.title }) }}>Edit title</button>
                   <button onClick={(e) => { e.stopPropagation(); deleteStep(s.id) }} style={{ marginLeft: 8 }}>Delete step</button>
                 </div>
               </div>
@@ -395,20 +485,6 @@ export default function App() {
             {geminiLoading && <div className="gemini-answer"><strong>Gemini</strong><p>Thinking...</p></div>}
           </div>
           <div className="gemini-composer">
-            <label className="gemini-model-picker">
-              <span>Gemini version</span>
-              <select className={geminiModels.find(model => model.id === selectedGeminiModel)?.free ? 'gemini-select-free' : 'gemini-select-paid'} value={selectedGeminiModel} onChange={e => setSelectedGeminiModel(e.target.value)} disabled={geminiLoading}>
-                <optgroup label="Free models">
-                  {geminiModels.filter(model => model.free).map(model => <option key={model.id} value={model.id}>{model.name} (FREE)</option>)}
-                </optgroup>
-                <optgroup label="Paid models">
-                  {geminiModels.filter(model => !model.free).map(model => <option key={model.id} value={model.id}>{model.name} (PAID)</option>)}
-                </optgroup>
-              </select>
-              <strong className={geminiModels.find(model => model.id === selectedGeminiModel)?.free ? 'gemini-free' : 'gemini-paid'}>
-                {geminiModels.find(model => model.id === selectedGeminiModel)?.free ? 'FREE' : 'PAID'}
-              </strong>
-            </label>
             <textarea placeholder="Type a message for Gemini..." value={geminiMessage} onChange={e => setGeminiMessage(e.target.value)} rows={4} />
             <label className="gemini-audio-picker">
               <span>{geminiAudioFile ? geminiAudioFile.name : 'Attach audio'}</span>
