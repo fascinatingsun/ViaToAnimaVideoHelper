@@ -2,6 +2,9 @@ const assert = require('assert');
 const http = require('http');
 const { spawn } = require('child_process');
 const axios = require('axios');
+const FormData = require('form-data');
+const fs = require('fs');
+const path = require('path');
 
 const firstMessage = 'Remember this project codename: Orion.';
 const secondMessage = 'What is the project codename I asked you to remember?';
@@ -76,7 +79,21 @@ async function main() {
     const secondAnswer = second.data.candidates[0].content.parts[0].text;
     assert.strictEqual(secondAnswer, 'The codename is Orion.');
     assert.strictEqual(providerRequest.contents.at(-1).parts[0].text, secondMessage);
-    console.log('Gemini session E2E: Passed; second request included prior conversation context.');
+
+    const audioForm = new FormData();
+    audioForm.append('message', 'Analyze this audio in the context of our conversation.');
+    audioForm.append('history', JSON.stringify(history));
+    audioForm.append('sessionId', 'audio-test-session');
+    audioForm.append('audio', fs.createReadStream(path.resolve(__dirname, '..', 'test-audio.txt')), {
+      filename: 'test-audio.wav',
+      contentType: 'audio/wav'
+    });
+    await axios.post(`${apiBase}/api/gemini-chat`, audioForm, { headers: audioForm.getHeaders() });
+    const audioPart = providerRequest.contents.at(-1).parts.find(part => part.inline_data);
+    assert.ok(audioPart, 'Gemini provider request did not include inline audio data');
+    assert.strictEqual(audioPart.inline_data.mime_type, 'audio/wav');
+    assert.ok(audioPart.inline_data.data.length > 0, 'Gemini provider request included empty audio data');
+    console.log('Gemini session E2E: Passed; text context and audio upload were forwarded.');
   } finally {
     if (app) app.kill();
     provider.close();

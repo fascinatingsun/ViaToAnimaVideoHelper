@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useRef, useState, useEffect } from 'react'
 import './App.css'
 
 export default function App() {
@@ -178,6 +178,8 @@ export default function App() {
 
   // Gemini chat UI state
   const [geminiMessage, setGeminiMessage] = useState('')
+  const [geminiAudioFile, setGeminiAudioFile] = useState(null)
+  const geminiAudioInputRef = useRef(null)
   const [geminiHistory, setGeminiHistory] = useState([])
   const [geminiLoading, setGeminiLoading] = useState(false)
   const [pollinationsPrompt, setPollinationsPrompt] = useState('')
@@ -197,33 +199,49 @@ export default function App() {
     const message = geminiMessage.trim()
     if (!message) return alert('Enter a message to send to Gemini')
     setGeminiMessage('')
+    const audioFile = geminiAudioFile?.size > 0 ? geminiAudioFile : null
     setGeminiLoading(true)
     try {
       const context = geminiHistory.flatMap(entry => [
         { role: 'user', parts: [{ text: entry.question }] },
         ...(entry.answer ? [{ role: 'model', parts: [{ text: entry.answer }] }] : [])
       ])
-      const res = await fetch(`${apiBase}/api/gemini-chat`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session-ID': sessionId }, body: JSON.stringify({ message, history: context, sessionId }) })
+      const request = audioFile
+        ? (() => {
+          const formData = new FormData()
+          if (message) formData.append('message', message)
+          formData.append('audio', audioFile)
+          formData.append('history', JSON.stringify(context))
+          formData.append('sessionId', sessionId)
+          return { headers: { 'X-Session-ID': sessionId }, body: formData }
+        })()
+        : {
+          headers: { 'Content-Type': 'application/json', 'X-Session-ID': sessionId },
+          body: JSON.stringify({ message, history: context, sessionId })
+        }
+      const res = await fetch(`${apiBase}/api/gemini-chat`, { method: 'POST', ...request })
       const text = await res.text()
       try {
         const parsed = JSON.parse(text)
         setGeminiHistory(history => [...history, {
           id: Date.now(),
-          question: message,
+          question: audioFile ? `${message} (Audio: ${audioFile.name})` : message,
           answer: res.ok ? getGeminiText(parsed) : '',
           error: res.ok ? '' : getGeminiText(parsed)
         }])
       } catch (e) {
         setGeminiHistory(history => [...history, {
           id: Date.now(),
-          question: message,
+          question: audioFile ? `${message} (Audio: ${audioFile.name})` : message,
           answer: res.ok ? text : '',
           error: res.ok ? '' : text
         }])
       }
     } catch (err) {
-      setGeminiHistory(history => [...history, { id: Date.now(), question: message, answer: '', error: err.message || String(err) }])
+      setGeminiHistory(history => [...history, { id: Date.now(), question: audioFile ? `${message} (Audio: ${audioFile.name})` : message, answer: '', error: err.message || String(err) }])
     } finally {
+      setGeminiAudioFile(null)
+      if (geminiAudioInputRef.current) geminiAudioInputRef.current.value = ''
       setGeminiLoading(false)
     }
   }
@@ -349,7 +367,7 @@ export default function App() {
       </details>
 
       <details className="main-section">
-        <summary><h2>Chat with Gemini (text only)</h2></summary>
+        <summary><h2>Chat with Gemini</h2></summary>
         <div className="gemini-chat">
           <div className="gemini-history" aria-live="polite">
             {geminiHistory.length === 0 && <p className="gemini-empty">Your Gemini answers will appear here.</p>}
@@ -364,6 +382,10 @@ export default function App() {
           </div>
           <div className="gemini-composer">
             <textarea placeholder="Type a message for Gemini..." value={geminiMessage} onChange={e => setGeminiMessage(e.target.value)} rows={4} />
+            <label className="gemini-audio-picker">
+              <span>{geminiAudioFile ? geminiAudioFile.name : 'Attach audio'}</span>
+              <input ref={geminiAudioInputRef} type="file" accept="audio/*" onChange={e => setGeminiAudioFile(e.target.files[0] || null)} />
+            </label>
             <button onClick={sendGeminiMessage} disabled={geminiLoading}>{geminiLoading ? 'Sending...' : 'Send to Gemini'}</button>
           </div>
         </div>

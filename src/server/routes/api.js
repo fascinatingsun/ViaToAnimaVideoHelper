@@ -37,6 +37,11 @@ router.get('/_key-check', (req, res) => {
 });
 
 const upload = multer({ dest: path.join(__dirname, '..', 'uploads') });
+const geminiChatUpload = multer({
+  dest: path.join(__dirname, '..', 'uploads'),
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (req, file, callback) => callback(null, file.mimetype.startsWith('audio/'))
+});
 
 router.post('/upload', upload.single('audio'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
@@ -94,18 +99,33 @@ router.post('/generate-prompt', async (req, res) => {
 });
 
 // Direct Gemini chat endpoint: forwards `message` to Gemini and returns raw response or error
-router.post('/gemini-chat', async (req, res) => {
+router.post('/gemini-chat', geminiChatUpload.single('audio'), async (req, res) => {
   const { message, history } = req.body;
   const sessionId = req.get('X-Session-ID') || req.body.sessionId || null;
-  if (!message) return res.status(400).json({ error: 'message required' });
+  const audioFile = req.file;
+  const textMessage = typeof message === 'string' ? message.trim() : '';
+  if (!textMessage) return res.status(400).json({ error: 'message required' });
+  if (audioFile && audioFile.size === 0) return res.status(400).json({ error: 'audio file is empty' });
   if (!GEMINI_KEY) return res.status(400).json({ error: 'GEMINI_API_KEY not configured on server' });
 
-  const previousContents = Array.isArray(history) ? history : [];
-  const contents = [...previousContents, { role: 'user', parts: [{ text: message }] }];
+  let parsedHistory = history;
+  if (typeof parsedHistory === 'string') {
+    try { parsedHistory = JSON.parse(parsedHistory); } catch (error) { parsedHistory = []; }
+  }
+  const previousContents = Array.isArray(parsedHistory) ? parsedHistory : [];
+  const userParts = [];
+  if (textMessage) userParts.push({ text: textMessage });
+  if (audioFile) {
+    userParts.push({ inline_data: {
+      mime_type: audioFile.mimetype,
+      data: fs.readFileSync(audioFile.path).toString('base64')
+    } });
+  }
+  const contents = [...previousContents, { role: 'user', parts: userParts }];
 
   try {
     console.log(`Gemini chat request: session ${sessionId || 'unknown'}`);
-    const r = await generateGeminiContent(message, contents);
+    const r = await generateGeminiContent(textMessage || 'Please analyze the attached audio.', contents);
     // Return the provider response body as-is
     return res.status(200).json({ ...r.data, sessionId });
   } catch (err) {
@@ -115,6 +135,8 @@ router.post('/gemini-chat', async (req, res) => {
     }
     // Network or other error
     return res.status(500).json({ error: err.message });
+  } finally {
+    if (audioFile) fs.unlink(audioFile.path, () => {});
   }
 });
 
