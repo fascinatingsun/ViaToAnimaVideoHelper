@@ -2,6 +2,10 @@ import React, { useState, useEffect } from 'react'
 import './App.css'
 
 export default function App() {
+  const [sessionId] = useState(() => {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID()
+    return `session-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  })
   const [file, setFile] = useState(null)
   const [uploadResp, setUploadResp] = useState(null)
   const [analysis, setAnalysis] = useState(null)
@@ -174,8 +178,7 @@ export default function App() {
 
   // Gemini chat UI state
   const [geminiMessage, setGeminiMessage] = useState('')
-  const [geminiResponse, setGeminiResponse] = useState('')
-  const [geminiError, setGeminiError] = useState('')
+  const [geminiHistory, setGeminiHistory] = useState([])
   const [geminiLoading, setGeminiLoading] = useState(false)
   const [pollinationsPrompt, setPollinationsPrompt] = useState('')
   const [pollinationsImageUrl, setPollinationsImageUrl] = useState('')
@@ -183,26 +186,43 @@ export default function App() {
   const [pollinationsLoading, setPollinationsLoading] = useState(false)
   const [pollinationsProgress, setPollinationsProgress] = useState(0)
 
+  const getGeminiText = (data) => {
+    if (data?.candidates?.[0]?.content?.parts) {
+      return data.candidates[0].content.parts.map(part => part.text || '').join('').trim()
+    }
+    return typeof data === 'string' ? data : JSON.stringify(data, null, 2)
+  }
+
   const sendGeminiMessage = async () => {
-    setGeminiResponse('')
-    setGeminiError('')
-    if (!geminiMessage) return alert('Enter a message to send to Gemini')
+    const message = geminiMessage.trim()
+    if (!message) return alert('Enter a message to send to Gemini')
+    setGeminiMessage('')
     setGeminiLoading(true)
     try {
-      const res = await fetch(`${apiBase}/api/gemini-chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: geminiMessage }) })
+      const context = geminiHistory.flatMap(entry => [
+        { role: 'user', parts: [{ text: entry.question }] },
+        ...(entry.answer ? [{ role: 'model', parts: [{ text: entry.answer }] }] : [])
+      ])
+      const res = await fetch(`${apiBase}/api/gemini-chat`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session-ID': sessionId }, body: JSON.stringify({ message, history: context, sessionId }) })
       const text = await res.text()
-      // try parse JSON
       try {
         const parsed = JSON.parse(text)
-        if (res.ok) setGeminiResponse(JSON.stringify(parsed, null, 2))
-        else setGeminiError(JSON.stringify(parsed, null, 2))
+        setGeminiHistory(history => [...history, {
+          id: Date.now(),
+          question: message,
+          answer: res.ok ? getGeminiText(parsed) : '',
+          error: res.ok ? '' : getGeminiText(parsed)
+        }])
       } catch (e) {
-        // not JSON
-        if (res.ok) setGeminiResponse(text)
-        else setGeminiError(text)
+        setGeminiHistory(history => [...history, {
+          id: Date.now(),
+          question: message,
+          answer: res.ok ? text : '',
+          error: res.ok ? '' : text
+        }])
       }
     } catch (err) {
-      setGeminiError(err.message || String(err))
+      setGeminiHistory(history => [...history, { id: Date.now(), question: message, answer: '', error: err.message || String(err) }])
     } finally {
       setGeminiLoading(false)
     }
@@ -234,20 +254,20 @@ export default function App() {
     <div className="container">
       <h1>ViaToAnima — Story Builder</h1>
 
-      <section>
-        <h2>Header — Global style prompt (saved to session)</h2>
+      <details className="main-section" open>
+        <summary><h2>Header — Global style prompt (saved to session)</h2></summary>
         <input value={globalStylePrompt} onChange={e => setGlobalStyle(e.target.value)} style={{ width: '80%' }} placeholder="Enter global style prompt (saved to session)" />
-      </section>
+      </details>
 
-      <section>
-        <h2>1) Upload audio</h2>
+      <details className="main-section" open>
+        <summary><h2>1) Upload audio</h2></summary>
         <input type="file" accept="audio/*" onChange={e => setFile(e.target.files[0])} />
         <button onClick={upload}>Upload</button>
         {uploadResp && <div>Uploaded: {uploadResp.filename}</div>}
-      </section>
+      </details>
 
-      <section>
-        <h2>2) Analyze & Plan</h2>
+      <details className="main-section" open>
+        <summary><h2>2) Analyze & Plan</h2></summary>
         <button onClick={handleAnalyze}>Analyze and create plan</button>
         {analysis && (
           <div>
@@ -306,10 +326,10 @@ export default function App() {
             </div>
           ))}
         </div>
-      </section>
+      </details>
 
-      <section>
-        <h2>Styles (profiles)</h2>
+      <details className="main-section">
+        <summary><h2>Styles (profiles)</h2></summary>
         <div>
           <strong>Saved styles:</strong>
           <div>
@@ -326,28 +346,31 @@ export default function App() {
             <button onClick={saveStyle} style={{ marginLeft: 8 }}>Save style</button>
           </div>
         </div>
-      </section>
+      </details>
 
-      <section>
-        <h2>Chat with Gemini (text only)</h2>
-        <div>
-          <textarea placeholder="Type a message for Gemini..." value={geminiMessage} onChange={e => setGeminiMessage(e.target.value)} rows={4} style={{ width: '100%' }} />
-          <div style={{ marginTop: 8 }}>
+      <details className="main-section">
+        <summary><h2>Chat with Gemini (text only)</h2></summary>
+        <div className="gemini-chat">
+          <div className="gemini-history" aria-live="polite">
+            {geminiHistory.length === 0 && <p className="gemini-empty">Your Gemini answers will appear here.</p>}
+            {geminiHistory.map(entry => (
+              <article className="gemini-entry" key={entry.id}>
+                <div className="gemini-question"><strong>You</strong><p>{entry.question}</p></div>
+                {entry.answer && <div className="gemini-answer"><strong>Gemini</strong><p>{entry.answer}</p></div>}
+                {entry.error && <div className="gemini-error"><strong>Gemini error</strong><p>{entry.error}</p></div>}
+              </article>
+            ))}
+            {geminiLoading && <div className="gemini-answer"><strong>Gemini</strong><p>Thinking...</p></div>}
+          </div>
+          <div className="gemini-composer">
+            <textarea placeholder="Type a message for Gemini..." value={geminiMessage} onChange={e => setGeminiMessage(e.target.value)} rows={4} />
             <button onClick={sendGeminiMessage} disabled={geminiLoading}>{geminiLoading ? 'Sending...' : 'Send to Gemini'}</button>
           </div>
         </div>
-        <div style={{ marginTop: 12 }}>
-          <strong>Gemini response (raw):</strong>
-          <pre style={{ whiteSpace: 'pre-wrap', background: '#f6f6f6', padding: 8, borderRadius: 6, maxHeight: 240, overflow: 'auto' }}>{geminiResponse || <em>No response yet.</em>}</pre>
-        </div>
-        <div style={{ marginTop: 12 }}>
-          <strong>Gemini error (raw):</strong>
-          <pre style={{ whiteSpace: 'pre-wrap', background: '#fff0f0', padding: 8, borderRadius: 6, maxHeight: 240, overflow: 'auto', color: '#900' }}>{geminiError || <em>No error.</em>}</pre>
-        </div>
-      </section>
+      </details>
 
-      <section>
-        <h2>Generate image with Pollinations</h2>
+      <details className="main-section">
+        <summary><h2>Generate image with Pollinations</h2></summary>
         <textarea
           placeholder="Describe the image you want to create..."
           value={pollinationsPrompt}
@@ -376,11 +399,8 @@ export default function App() {
             <a href={pollinationsImageUrl} target="_blank" rel="noreferrer">Open full-size image</a>
           </div>
         )}
-      </section>
+      </details>
 
-      <footer style={{ marginTop: 24 }}>
-        <small>Prototype uses mocked AI calls; replace server stubs with real API requests and add API keys to .env.</small>
-      </footer>
     </div>
   )
 }

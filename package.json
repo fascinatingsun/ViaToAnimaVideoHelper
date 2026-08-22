@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "start": "npm --prefix ./src/client run build && node index.js",
+    "start": "vite build && node index.js",
     "dev": "node index.js",
     "test:e2e": "node e2e/run-e2e.js",
+    "test:e2e:gemini-session": "node e2e/test-gemini-session.js",
     "test:e2e:image": "node e2e/test-pollinations.js"
   },
   "dependencies": {
@@ -17,7 +18,7 @@
     "multer": "^2.2.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "vite": "6.4.1"
+    "vite": "^6.4.3"
   },
   "devDependencies": {
     "concurrently": "^8.0.0",

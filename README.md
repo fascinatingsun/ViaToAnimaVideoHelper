@@ -7,32 +7,19 @@ This repository contains a minimal Node.js + React prototype to:
 
 Quick start
 
-1) Install dependencies for server and client
+1) Install dependencies
 
 ```bash
-cd src/server
-npm install
-cd ../client
 npm install
 ```
 
-2) Run server and client in separate terminals
-
-Server:
+2) Run the application
 
 ```bash
-cd src/server
-npm run start
-```
-
-Client (now located inside `src/client`):
-
-```bash
-cd src/client
 npm run dev
 ```
 
-3) Open the client (Vite will show the URL, usually http://localhost:5173)
+Open http://localhost:4000 in your browser.
 
 API keys
 
@@ -49,17 +36,9 @@ Next steps
 
 Single-process deployment (serve built SPA from Express)
 
-1. Build the client (now in `src/client`):
+1. Build the application:
 
 ```bash
-cd src/client
-npm run build
-```
-
-2. Start the server which will serve the built files and the API:
-
-```bash
-cd src/server
 npm run start
 ```
 

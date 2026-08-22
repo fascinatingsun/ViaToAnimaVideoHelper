@@ -10,9 +10,10 @@ const GEMINI_BASE = process.env.GEMINI_BASE || 'https://generativelanguage.googl
 
 const router = express.Router();
 
-async function generateGeminiContent(text) {
+async function generateGeminiContent(text, history = []) {
   const url = `${GEMINI_BASE}/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_KEY)}`;
-  const body = { contents: [{ parts: [{ text }] }] };
+  const contents = history.length > 0 ? history : [{ role: 'user', parts: [{ text }] }];
+  const body = { contents };
   let lastError;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
@@ -94,14 +95,19 @@ router.post('/generate-prompt', async (req, res) => {
 
 // Direct Gemini chat endpoint: forwards `message` to Gemini and returns raw response or error
 router.post('/gemini-chat', async (req, res) => {
-  const { message } = req.body;
+  const { message, history } = req.body;
+  const sessionId = req.get('X-Session-ID') || req.body.sessionId || null;
   if (!message) return res.status(400).json({ error: 'message required' });
   if (!GEMINI_KEY) return res.status(400).json({ error: 'GEMINI_API_KEY not configured on server' });
 
+  const previousContents = Array.isArray(history) ? history : [];
+  const contents = [...previousContents, { role: 'user', parts: [{ text: message }] }];
+
   try {
-    const r = await generateGeminiContent(message);
+    console.log(`Gemini chat request: session ${sessionId || 'unknown'}`);
+    const r = await generateGeminiContent(message, contents);
     // Return the provider response body as-is
-    return res.status(200).json(r.data);
+    return res.status(200).json({ ...r.data, sessionId });
   } catch (err) {
     // If the provider returned an HTTP error, forward its status and body so client can read raw error
     if (err.response) {
