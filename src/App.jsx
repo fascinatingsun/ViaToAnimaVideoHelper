@@ -178,6 +178,19 @@ export default function App() {
 
   // Gemini chat UI state
   const [geminiMessage, setGeminiMessage] = useState('')
+  const geminiModels = [
+    { id: 'gemini-3.7-flash', name: 'Gemini 3.7 Flash', free: true },
+    { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash', free: true },
+    { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash', free: true },
+    { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash-Lite', free: true },
+    { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash-Lite', free: true },
+    { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash (Preview)', free: true },
+    { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (Preview)', free: false },
+    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', free: true },
+    { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash-Lite', free: true },
+    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', free: false }
+  ]
+  const [selectedGeminiModel, setSelectedGeminiModel] = useState(geminiModels[0].id)
   const [geminiAudioFile, setGeminiAudioFile] = useState(null)
   const geminiAudioInputRef = useRef(null)
   const [geminiHistory, setGeminiHistory] = useState([])
@@ -213,11 +226,12 @@ export default function App() {
           formData.append('audio', audioFile)
           formData.append('history', JSON.stringify(context))
           formData.append('sessionId', sessionId)
+          formData.append('model', selectedGeminiModel)
           return { headers: { 'X-Session-ID': sessionId }, body: formData }
         })()
         : {
           headers: { 'Content-Type': 'application/json', 'X-Session-ID': sessionId },
-          body: JSON.stringify({ message, history: context, sessionId })
+          body: JSON.stringify({ message, history: context, sessionId, model: selectedGeminiModel })
         }
       const res = await fetch(`${apiBase}/api/gemini-chat`, { method: 'POST', ...request })
       const text = await res.text()
@@ -381,6 +395,20 @@ export default function App() {
             {geminiLoading && <div className="gemini-answer"><strong>Gemini</strong><p>Thinking...</p></div>}
           </div>
           <div className="gemini-composer">
+            <label className="gemini-model-picker">
+              <span>Gemini version</span>
+              <select className={geminiModels.find(model => model.id === selectedGeminiModel)?.free ? 'gemini-select-free' : 'gemini-select-paid'} value={selectedGeminiModel} onChange={e => setSelectedGeminiModel(e.target.value)} disabled={geminiLoading}>
+                <optgroup label="Free models">
+                  {geminiModels.filter(model => model.free).map(model => <option key={model.id} value={model.id}>{model.name} (FREE)</option>)}
+                </optgroup>
+                <optgroup label="Paid models">
+                  {geminiModels.filter(model => !model.free).map(model => <option key={model.id} value={model.id}>{model.name} (PAID)</option>)}
+                </optgroup>
+              </select>
+              <strong className={geminiModels.find(model => model.id === selectedGeminiModel)?.free ? 'gemini-free' : 'gemini-paid'}>
+                {geminiModels.find(model => model.id === selectedGeminiModel)?.free ? 'FREE' : 'PAID'}
+              </strong>
+            </label>
             <textarea placeholder="Type a message for Gemini..." value={geminiMessage} onChange={e => setGeminiMessage(e.target.value)} rows={4} />
             <label className="gemini-audio-picker">
               <span>{geminiAudioFile ? geminiAudioFile.name : 'Attach audio'}</span>

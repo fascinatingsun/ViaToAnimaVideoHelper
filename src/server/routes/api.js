@@ -7,11 +7,23 @@ const axios = require('axios');
 const GEMINI_KEY = process.env.GEMINI_API_KEY || process.env.GEMINY_API_KEY || null;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 const GEMINI_BASE = process.env.GEMINI_BASE || 'https://generativelanguage.googleapis.com';
+const GEMINI_MODELS = new Set([
+  'gemini-3.7-flash',
+  'gemini-3.6-flash',
+  'gemini-3.5-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-3.1-flash-lite',
+  'gemini-3-flash-preview',
+  'gemini-3.1-pro-preview',
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-2.5-pro'
+]);
 
 const router = express.Router();
 
-async function generateGeminiContent(text, history = []) {
-  const url = `${GEMINI_BASE}/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_KEY)}`;
+async function generateGeminiContent(text, history = [], model = GEMINI_MODEL) {
+  const url = `${GEMINI_BASE}/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(GEMINI_KEY)}`;
   const contents = history.length > 0 ? history : [{ role: 'user', parts: [{ text }] }];
   const body = { contents };
   let lastError;
@@ -100,13 +112,14 @@ router.post('/generate-prompt', async (req, res) => {
 
 // Direct Gemini chat endpoint: forwards `message` to Gemini and returns raw response or error
 router.post('/gemini-chat', geminiChatUpload.single('audio'), async (req, res) => {
-  const { message, history } = req.body;
+  const { message, history, model } = req.body;
   const sessionId = req.get('X-Session-ID') || req.body.sessionId || null;
   const audioFile = req.file;
   const textMessage = typeof message === 'string' ? message.trim() : '';
   if (!textMessage) return res.status(400).json({ error: 'message required' });
   if (audioFile && audioFile.size === 0) return res.status(400).json({ error: 'audio file is empty' });
   if (!GEMINI_KEY) return res.status(400).json({ error: 'GEMINI_API_KEY not configured on server' });
+  if (model && !GEMINI_MODELS.has(model)) return res.status(400).json({ error: 'unsupported Gemini model' });
 
   let parsedHistory = history;
   if (typeof parsedHistory === 'string') {
@@ -125,7 +138,7 @@ router.post('/gemini-chat', geminiChatUpload.single('audio'), async (req, res) =
 
   try {
     console.log(`Gemini chat request: session ${sessionId || 'unknown'}`);
-    const r = await generateGeminiContent(textMessage || 'Please analyze the attached audio.', contents);
+    const r = await generateGeminiContent(textMessage || 'Please analyze the attached audio.', contents, model || GEMINI_MODEL);
     // Return the provider response body as-is
     return res.status(200).json({ ...r.data, sessionId });
   } catch (err) {

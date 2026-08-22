@@ -30,7 +30,9 @@ async function waitForServer(url) {
 
 async function main() {
   let providerRequest;
+  let providerPath;
   const provider = http.createServer((request, response) => {
+    providerPath = request.url;
     let body = '';
     request.on('data', chunk => { body += chunk; });
     request.on('end', () => {
@@ -67,9 +69,11 @@ async function main() {
     });
 
     await waitForServer(apiBase);
-    const first = await axios.post(`${apiBase}/api/gemini-chat`, { message: firstMessage, history: [] });
+    const selectedModel = 'gemini-2.5-flash-lite';
+    const first = await axios.post(`${apiBase}/api/gemini-chat`, { message: firstMessage, history: [], model: selectedModel });
     const firstAnswer = first.data.candidates[0].content.parts[0].text;
     assert.strictEqual(firstAnswer, 'The codename is Orion.');
+    assert.ok(providerPath.startsWith(`/v1beta/models/${selectedModel}:generateContent`), 'Selected Gemini model was not sent to the provider');
 
     const history = [
       { role: 'user', parts: [{ text: firstMessage }] },
@@ -84,6 +88,7 @@ async function main() {
     audioForm.append('message', 'Analyze this audio in the context of our conversation.');
     audioForm.append('history', JSON.stringify(history));
     audioForm.append('sessionId', 'audio-test-session');
+    audioForm.append('model', 'gemini-3.5-flash');
     audioForm.append('audio', fs.createReadStream(path.resolve(__dirname, '..', 'test-audio.txt')), {
       filename: 'test-audio.wav',
       contentType: 'audio/wav'
