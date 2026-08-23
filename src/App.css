@@ -13,6 +13,9 @@ textarea { width: 100%; }
 .audio-prompt { margin-top: 12px; }
 .audio-prompt-preview { display: block; width: 100%; text-align: left; font-weight: bold; }
 .audio-prompt textarea { box-sizing: border-box; margin-top: 8px; resize: vertical; }
+.global-style-preview { display: block; width: 100%; text-align: left; font-weight: bold; white-space: pre-wrap; }
+.global-style-editor textarea { box-sizing: border-box; margin-top: 0; resize: vertical; }
+.global-style-editor button { display: block; }
 .gemini-plan-result { margin-top: 16px; }
 .gemini-plan-result h3 { margin: 0 0 8px; }
 .table-scroll { overflow-x: auto; }

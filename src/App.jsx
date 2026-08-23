@@ -1,6 +1,8 @@
 import React, { useRef, useState, useEffect } from 'react'
 import './App.css'
 
+const defaultGlobalStylePrompt = 'Abstract meditation background, a single glowing lotus flower floating on calm foggy water ripples, ultra realistic textured watercolor paper texture, soft watercolor painting, bleeding ink edges, pastel colors, fluid brush strokes, cinematic lighting, masterwork, 8k --seed 55555 --v flux'
+
 function parseGeminiPlanTable(text) {
   const lines = String(text || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean)
   const tableLines = lines.filter(line => line.includes('|'))
@@ -131,21 +133,29 @@ export default function App() {
 
   // Plan/state management
   const [plan, setPlan] = useState([])
-  const [globalStylePrompt, setGlobalStylePrompt] = useState('')
+  const [globalStylePrompt, setGlobalStylePrompt] = useState(defaultGlobalStylePrompt)
+  const [globalStylePromptDraft, setGlobalStylePromptDraft] = useState(defaultGlobalStylePrompt)
+  const [isGlobalStylePromptOpen, setIsGlobalStylePromptOpen] = useState(false)
 
   useEffect(() => {
     try {
-      const m = document.cookie.match('(^|;)\\s*global_style=\\s*([^;]+)')
-      if (m) setGlobalStylePrompt(decodeURIComponent(m[2]))
+      const m = document.cookie.match('(^|;)\\s*global_style=\\s*([^;]*)')
+      if (m) {
+        const savedPrompt = decodeURIComponent(m[2])
+        setGlobalStylePrompt(savedPrompt)
+        setGlobalStylePromptDraft(savedPrompt)
+      }
     } catch (e) {}
   }, [])
 
-  const setGlobalStyle = (v) => {
-    setGlobalStylePrompt(v)
+  const saveGlobalStyle = () => {
+    const value = globalStylePromptDraft.trim()
+    setGlobalStylePrompt(value)
+    setIsGlobalStylePromptOpen(false)
     try {
-      document.cookie = `global_style=${encodeURIComponent(v)}; path=/; max-age=${60 * 60 * 24 * 365}`
+      document.cookie = `global_style=${encodeURIComponent(value)}; path=/; max-age=${60 * 60 * 24 * 365}`
     } catch (e) {
-      localStorage.setItem('global_style', v)
+      localStorage.setItem('global_style', value)
     }
   }
 
@@ -343,7 +353,19 @@ export default function App() {
 
       <details className="main-section" open>
         <summary><h2>Header — Global style prompt (saved to session)</h2></summary>
-        <input value={globalStylePrompt} onChange={e => setGlobalStyle(e.target.value)} style={{ width: '80%' }} placeholder="Enter global style prompt (saved to session)" />
+        {isGlobalStylePromptOpen ? (
+          <div className="global-style-editor">
+            <textarea aria-label="Global style prompt" value={globalStylePromptDraft} onChange={e => setGlobalStylePromptDraft(e.target.value)} rows={4} />
+            <button onClick={saveGlobalStyle}>Save</button>
+          </div>
+        ) : (
+          <button className="global-style-preview" onClick={() => {
+            setGlobalStylePromptDraft(globalStylePrompt)
+            setIsGlobalStylePromptOpen(true)
+          }}>
+            {globalStylePrompt || 'clicl to edit default image settings'}
+          </button>
+        )}
       </details>
 
       <details className="main-section" open>
