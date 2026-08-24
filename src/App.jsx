@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react'
 import './App.css'
 
-const defaultGlobalStylePrompt = 'Abstract meditation background, a single glowing lotus flower floating on calm foggy water ripples, ultra realistic textured watercolor paper texture, soft watercolor painting, bleeding ink edges, pastel colors, fluid brush strokes, cinematic lighting, masterwork, 8k --seed 55555 --v flux'
+const defaultGlobalStylePrompt = 'Abstract meditation background, ultra realistic textured watercolor paper texture, soft watercolor painting, bleeding ink edges, pastel colors, fluid brush strokes, cinematic lighting, masterwork, 4k --ar 16:9 --seed 1111 --v turbo'
 
 function parseGeminiPlanTable(text) {
   const lines = String(text || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean)
@@ -27,25 +27,26 @@ export default function App() {
     return `session-${Date.now()}-${Math.random().toString(36).slice(2)}`
   })
   const [file, setFile] = useState(null)
-  const defaultGeminiAudioPrompt = `Прослушай этот аудиофайл с медитацией. Обрати внимание: в записи очень много длинных пауз и периодов тишины между редкими словами ведущего. Твоя задача — составить подробный покадровый план для создания визуального ряда (видео для YouTube).
+  const defaultGeminiAudioPrompt = `Прослушай этот аудиофайл с медитацией. Обрати внимание: в записи очень много длинных пауз и периодов тишины между редкими словами ведущего. Твоя задача — составить подробный покадровый план по таймкодам. На основе этого плана в коде будут генерироваться изображения для YouTube-видео.
 
-Картинки должны быть максимально нейтральными, гипнотическими, расслабляющими, без резких деталей, чтобы помогать медитации, а не отвлекать от неё. На длинных паузах картинка НЕ должна меняться слишком часто — одна сцена должна удерживать атмосферу.
+Главное правило: на длинных паузах картинка НЕ должна меняться. Одна сцена должна длиться всё время тишины, чтобы удерживать атмосферу и не отвлекать пользователя частой сменой кадров. В колонке «Промпт для генерации» пиши только СУТЬ происходящего (конкретные базовые образы или объекты), БЕЗ указания художественного стиля, качества, параметров камеры, разрешения или освещения. Все настройки стиля будут автоматически добавлены позже в коде.
 
 Выведи результат строго в виде markdown-таблицы со следующими колонками:
 
-1. **Таймкод (От - До)**: Укажи точные границы кадра. Если идет длинная пауза, пусть этот кадр длится всё время паузы.
-2. **Тип момента**: Укажи, что происходит ("Голос ведущего" или "Длинная пауза/Тишина").
-3. **Описание атмосферы**: Коротко опиши настроение звука в этот момент (например: "Плавное погружение", "Глубокая тишина", "Фоновый шум ветра").
-4. **Промпт для генерации (на английском)**: Напиши готовый детальный промпт для нейросети (Midjourney/DALL-E).
+1. **Таймкод (От - До)**: Точные границы кадра. Если идет длинная пауза, пусть этот кадр длится всё время паузы.
+2. **Тип момента**: Что происходит ("Голос ведущего" или "Длинная пауза/Тишина").
+3. **Описание атмосферы**: Настроение звука в этот момент на русском языке (например: "Плавное погружение", "Глубокая тишина").
+4. **Промпт для генерации (на английском)**: Базовое описание центрального образа для нейросети.
 
-Правила для промптов:
-- Пиши только на английском языке.
-- Используй ключевые слова: "cinematic lighting, soft focus, minimal design, zen aesthetics, calming pastel colors, slow gradient, 4k, clean composition".
-- Исключи из промптов: людей, лица, текст, яркие неоновые цвета, резкие геометрические формы, суету. Картинки должны быть абстрактными или природными (туман, рассвет, гладь воды, облака, текстура камня).
+Правила для колонки «Промпт для генерации»:
+- Пиши строго на английском языке.
+- Описывай только ОБЪЕКТЫ или СУТЬ сцены (например: "calm water surface", "soft fog moving through distant mountains", "abstract smooth waves").
+- Категорически ЗАПРЕЩЕНО использовать технические и стилистические слова (НЕ пиши: 4k, cinematic, realistic, watercolor, pastel, ultra, focus, masterwork и т.д.).
+- Исключи из промптов: людей, лица, текст, яркие неоновые цвета, резкие геометрические формы. Картинки должны быть строго абстрактными или природными (туман, рассвет, гладь воды, облака, текстура камня).
 
 Пример строки таблицы:
 
-| 00:00 - 05:30 | Длинная пауза | Абсолютная тишина, расслабление | Minimalist abstract background, soft smooth color gradient from deep blue to warm sand, calming fog, zen style, slow cinematic light, 4k, high details, no people --ar 16:9 |`
+| 00:00 - 05:30 | Длинная пауза | Абсолютная тишина, расслабление | Calm water surface with thick morning fog |`
   const [geminiAudioPrompt, setGeminiAudioPrompt] = useState(defaultGeminiAudioPrompt)
   const [isGeminiAudioPromptOpen, setIsGeminiAudioPromptOpen] = useState(false)
   const [geminiPlanTable, setGeminiPlanTable] = useState([])
@@ -250,10 +251,7 @@ export default function App() {
     { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash-Lite', free: true },
     { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash-Lite', free: true },
     { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash (Preview)', free: true },
-    { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (Preview)', free: false },
-    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', free: true },
-    { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash-Lite', free: true },
-    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', free: false }
+    { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (Preview)', free: false }
   ]
   const [selectedGeminiModel, setSelectedGeminiModel] = useState(geminiModels[0].id)
   const [geminiAudioFile, setGeminiAudioFile] = useState(null)

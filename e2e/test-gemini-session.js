@@ -69,7 +69,7 @@ async function main() {
     });
 
     await waitForServer(apiBase);
-    const selectedModel = 'gemini-2.5-flash-lite';
+    const selectedModel = 'gemini-3.5-flash-lite';
     const first = await axios.post(`${apiBase}/api/gemini-chat`, { message: firstMessage, history: [], model: selectedModel });
     const firstAnswer = first.data.candidates[0].content.parts[0].text;
     assert.strictEqual(firstAnswer, 'The codename is Orion.');
