@@ -34,7 +34,7 @@ export default function App() {
 Выведи результат строго в виде markdown-таблицы со следующими колонками:
 
 1. **Таймкод (От - До)**: Точные границы кадра. Если идет длинная пауза, пусть этот кадр длится всё время паузы.
-2. **Тип момента**: Что происходит ("Голос ведущего" или "Длинная пауза/Тишина").
+2. **Тип момента**: Что происходит ("Голос ведущего" или "Длинная пауза/Тишина"), если ведущий что-то говорит, то напиши его слова в этой колонке.
 3. **Описание атмосферы**: Настроение звука в этот момент на русском языке (например: "Плавное погружение", "Глубокая тишина").
 4. **Промпт для генерации (на английском)**: Базовое описание центрального образа для нейросети.
 
@@ -113,7 +113,19 @@ export default function App() {
       })
       const parsed = await res.json()
       const answer = res.ok ? getGeminiText(parsed) : ''
-      if (answer) setGeminiPlanTable(parseGeminiPlanTable(answer))
+      if (answer) {
+        setGeminiPlanTable(parseGeminiPlanTable(answer).map((cells, index) => ({
+          id: `${Date.now()}-${index}`,
+          cells,
+          prompt: cells[3],
+          promptDraft: cells[3],
+          isPromptOpen: false,
+          images: [],
+          imagesOpen: true,
+          generating: false,
+          error: ''
+        })))
+      }
       setGeminiHistory(history => [...history, {
         id: Date.now(),
         question: `${geminiAudioPrompt.trim()} (Audio: ${file.name})`,
@@ -264,6 +276,42 @@ export default function App() {
   const [pollinationsLoading, setPollinationsLoading] = useState(false)
   const [pollinationsProgress, setPollinationsProgress] = useState(0)
 
+  const updateGeminiPlanRow = (id, patch) => {
+    setGeminiPlanTable(rows => rows.map(row => row.id === id ? { ...row, ...patch } : row))
+  }
+
+  const saveGeminiPlanPrompt = (row) => {
+    updateGeminiPlanRow(row.id, { prompt: row.promptDraft.trim(), isPromptOpen: false })
+  }
+
+  const generateImageForGeminiRow = async (row) => {
+    const prompt = row.promptDraft.trim()
+    if (!prompt) return
+    updateGeminiPlanRow(row.id, { generating: true, error: '' })
+    try {
+      const finalPrompt = [globalStylePrompt.trim(), prompt].filter(Boolean).join(' -- ')
+      const res = await fetch(`${apiBase}/api/generate-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: finalPrompt })
+      })
+      const data = await res.json()
+      if (!res.ok || !data.imageUrl) throw new Error(data.error || 'Image generation failed')
+      updateGeminiPlanRow(row.id, {
+        prompt,
+        images: [...row.images, { url: data.imageUrl, prompt: finalPrompt }],
+        generating: false,
+        imagesOpen: true
+      })
+    } catch (err) {
+      updateGeminiPlanRow(row.id, { generating: false, error: err.message || String(err) })
+    }
+  }
+
+  const toggleGeminiRowImages = (row) => {
+    updateGeminiPlanRow(row.id, { imagesOpen: !row.imagesOpen })
+  }
+
   const getGeminiText = (data) => {
     if (data?.candidates?.[0]?.content?.parts) {
       return data.candidates[0].content.parts.map(part => part.text || '').join('').trim()
@@ -410,8 +458,49 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {geminiPlanTable.map((row, index) => (
-                    <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>
+                  {geminiPlanTable.map(row => (
+                    <React.Fragment key={row.id}>
+                      <tr>
+                        {row.cells.slice(0, 3).map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}
+                        <td className="scene-prompt-cell">
+                          {row.isPromptOpen ? (
+                            <div className="scene-prompt-editor">
+                              <textarea
+                                aria-label="Image generation prompt"
+                                value={row.promptDraft}
+                                onChange={event => updateGeminiPlanRow(row.id, { promptDraft: event.target.value })}
+                                rows={4}
+                              />
+                              <button onClick={() => saveGeminiPlanPrompt(row)}>Save</button>
+                            </div>
+                          ) : (
+                            <button className="scene-prompt-preview" onClick={() => updateGeminiPlanRow(row.id, { promptDraft: row.prompt, isPromptOpen: true })}>
+                              {row.prompt || 'Click to add an image prompt'}
+                            </button>
+                          )}
+                          <button onClick={() => generateImageForGeminiRow(row)} disabled={row.generating || !row.promptDraft.trim()}>
+                            {row.generating ? 'Generating...' : 'Generate image'}
+                          </button>
+                          {row.error && <p className="scene-image-error">{row.error}</p>}
+                        </td>
+                      </tr>
+                      {row.images.length > 0 && (
+                        <tr className="scene-images-row">
+                          <td colSpan="4">
+                            <button className="scene-images-toggle" onClick={() => toggleGeminiRowImages(row)} aria-expanded={row.imagesOpen}>
+                              {row.imagesOpen ? 'Hide images' : `Show images (${row.images.length})`}
+                            </button>
+                            {row.imagesOpen && (
+                              <div className="scene-image-list">
+                                {row.images.map((image, imageIndex) => (
+                                  <img key={`${row.id}-${imageIndex}`} src={image.url} alt={`Generated scene ${imageIndex + 1}`} />
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>

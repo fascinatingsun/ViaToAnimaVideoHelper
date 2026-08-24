@@ -23,6 +23,16 @@ textarea { width: 100%; }
 .gemini-plan-result th, .gemini-plan-result td { padding: 8px; border: 1px solid #ccc; text-align: left; vertical-align: top; }
 .gemini-plan-result th { background: #eef2f7; }
 .gemini-plan-result td { white-space: pre-wrap; line-height: 1.4; }
+.scene-prompt-cell { min-width: 260px; }
+.scene-prompt-preview { display: block; width: 100%; text-align: left; font-weight: bold; white-space: pre-wrap; }
+.scene-prompt-editor textarea { box-sizing: border-box; margin-top: 0; resize: vertical; }
+.scene-prompt-editor button { display: block; }
+.scene-prompt-cell > button { display: block; }
+.scene-images-row td { padding: 8px; }
+.scene-images-toggle { margin-top: 0; }
+.scene-image-list { display: flex; gap: 8px; overflow-x: auto; padding: 8px 0 4px; width: 100%; }
+.scene-image-list img { flex: 0 0 180px; width: 180px; height: 120px; object-fit: cover; border: 1px solid #ddd; border-radius: 6px; }
+.scene-image-error { color: #900; margin: 8px 0 0; }
 
 .gemini-chat { display: flex; flex-direction: column; gap: 12px; }
 .gemini-history { max-height: 420px; min-height: 180px; overflow-y: auto; padding: 12px; background: #f7f8fa; border: 1px solid #ddd; border-radius: 6px; }
